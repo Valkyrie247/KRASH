@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dual-shell</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap"
+  />
+  <style>
+    /* ── reset & base ──────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #07091a;
+      --surface:     #0d1025;
+      --border:      #1e2540;
+      --prompt:      #f0b741;   /* amber  — keyboard prompt           */
+      --prompt-mic:  #fb7185;   /* rose   — voice prompt              */
+      --cmd:         #7dd3fc;   /* sky    — echoed command text       */
+      --output:      #bfc9d4;   /* cool gray — normal output          */
+      --error:       #f87171;   /* red    — stderr                    */
+      --muted:       #4a5568;   /* dim    — decorative / inactive     */
+      --cursor:      #f0b741;
+      --badge-kbd:   #1e3a4a;
+      --badge-mic:   #2d1e28;
+      --font:        'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      --fs-base:     13.5px;
+      --lh:          1.65;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--output);
+      font-family: var(--font);
+      font-size: var(--fs-base);
+      line-height: var(--lh);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── layout shell ──────────────────────────────────────────────────────── */
+    #shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    /* ── title bar ─────────────────────────────────────────────────────────── */
+    #titlebar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    .traffic {
+      display: flex;
+      gap: 6px;
+    }
+    .traffic span {
+      width: 11px; height: 11px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .traffic span:nth-child(1) { background: #f87171; }
+    .traffic span:nth-child(2) { background: #fbbf24; }
+    .traffic span:nth-child(3) { background: #4ade80; }
+
+    #titlebar h1 {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--muted);
+      letter-spacing: .06em;
+      margin-left: 8px;
+      flex: 1;
+      text-align: center;
+    }
+
+    /* Input mode badge in title bar */
+    #mode-badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      padding: 2px 8px;
+      border-radius: 3px;
+      transition: background .2s, color .2s;
+    }
+    #mode-badge.kbd  { background: var(--badge-kbd); color: var(--prompt);     }
+    #mode-badge.mic  { background: var(--badge-mic); color: var(--prompt-mic); }
+
+    /* ── output / history ──────────────────────────────────────────────────── */
+    #output {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px 8px;
+      scroll-behavior: smooth;
+    }
+
+    /* welcome banner */
+    .banner {
+      color: var(--muted);
+      margin-bottom: 24px;
+      border-left: 2px solid var(--border);
+      padding-left: 12px;
+    }
+    .banner b { color: var(--prompt); font-weight: 700; }
+
+    /* command entry block */
+    .entry { margin-bottom: 18px; }
+
+    .entry-prompt {
+      display: flex;
+      align-items: baseline;
+      gap: 0;
+      margin-bottom: 2px;
+    }
+
+    /* source badge: keyboard vs voice */
+    .source-tag {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .07em;
+      padding: 1px 5px;
+      border-radius: 2px;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    .source-tag.kbd { background: var(--badge-kbd); color: var(--prompt);     }
+    .source-tag.mic { background: var(--badge-mic); color: var(--prompt-mic); }
+
+    .prompt-cwd {
+      color: var(--muted);
+      font-size: 11px;
+      margin-right: 4px;
+    }
+    .prompt-char {
+      font-weight: 700;
+      margin-right: 6px;
+    }
+    .prompt-char.kbd { color: var(--prompt);     }
+    .prompt-char.mic { color: var(--prompt-mic); }
+
+    .cmd-text { color: var(--cmd); font-weight: 400; }
+
+    .entry-output {
+      padding-left: 2px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .entry-output.is-error { color: var(--error); }
+
+    /* ── input bar ─────────────────────────────────────────────────────────── */
+    #inputbar {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      padding: 10px 24px 14px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    #input-prompt {
+      font-weight: 700;
+      font-size: var(--fs-base);
+      padding-right: 8px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      color: var(--prompt);
+      transition: color .2s;
+    }
+    #input-prompt.mic-active { color: var(--prompt-mic); }
+
+    #cmd-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--cmd);
+      font-family: var(--font);
+      font-size: var(--fs-base);
+      caret-color: var(--cursor);
+      min-width: 0;
+    }
+    #cmd-input::placeholder { color: var(--muted); }
+    #cmd-input:disabled { opacity: .45; }
+
+    /* mic button */
+    #mic-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 9px;
+      cursor: pointer;
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: border-color .2s, color .2s, background .2s;
+      flex-shrink: 0;
+      margin-left: 10px;
+    }
+    #mic-btn:hover:not(:disabled) {
+      border-color: var(--prompt-mic);
+      color: var(--prompt-mic);
+    }
+    #mic-btn.recording {
+      border-color: var(--prompt-mic);
+      color: var(--prompt-mic);
+      background: var(--badge-mic);
+      animation: mic-pulse 1.1s ease-in-out infinite;
+    }
+    #mic-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(251,113,133,.0); }
+      50%       { box-shadow: 0 0 0 5px rgba(251,113,133,.22); }
+    }
+
+    .mic-icon { font-size: 13px; }
+
+    /* ── cursor blink ──────────────────────────────────────────────────────── */
+    #cmd-input:focus { outline: none; }
+
+    /* ── scrollbar ─────────────────────────────────────────────────────────── */
+    #output::-webkit-scrollbar { width: 4px; }
+    #output::-webkit-scrollbar-track { background: transparent; }
+    #output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── NLP annotation: "heard: …" shown under voice-normalized commands ──── */
+    .entry-heard {
+      font-size: 10px;
+      color: var(--muted);
+      padding-left: 2px;
+      margin-bottom: 2px;
+      font-style: italic;
+    }
+    .entry-heard::before { content: "↳ heard: "; color: var(--prompt-mic); font-style: normal; }
+
+    /* ── voice status line ─────────────────────────────────────────────────── */
+    #voice-status {
+      font-size: 10px;
+      color: var(--prompt-mic);
+      letter-spacing: .04em;
+      padding-left: 2px;
+      min-height: 14px;
+      margin-bottom: 2px;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+
+<div id="shell">
+
+  <!-- title bar -->
+  <header id="titlebar">
+    <div class="traffic">
+      <span></span><span></span><span></span>
+    </div>
+    <h1>dual-shell — unified command pipeline</h1>
+    <span id="mode-badge" class="kbd">KBD</span>
+  </header>
+
+  <!-- scrollable output -->
+  <main id="output">
+    <div class="banner">
+      <b>dual-shell</b> &mdash; typed and spoken commands share a single execution engine.<br>
+      Supported: <span style="color:var(--cmd)">cd &nbsp;ls &nbsp;pwd &nbsp;echo &nbsp;cat &nbsp;cls</span><br>
+      <span style="font-size:11px">Click the mic button or press <b style="color:var(--output)">Alt+M</b> to start speaking.</span>
+    </div>
+  </main>
+
+  <!-- input bar -->
+  <footer id="inputbar">
+    <span id="input-prompt">$ </span>
+    <input
+      id="cmd-input"
+      type="text"
+      autocomplete="off"
+      autocorrect="off"
+      autocapitalize="off"
+      spellcheck="false"
+      placeholder="type a command…"
+    />
+    <button id="mic-btn" title="Hold to dictate (Alt+M)">
+      <span class="mic-icon">🎤</span>
+      <span id="mic-label">mic</span>
+    </button>
+  </footer>
+
+</div>
+
+<!-- voice status overlay (above footer) -->
+<div id="voice-status"></div>
+
+<script>
+  /* ── config ─────────────────────────────────────────────────────────────── */
+  const API_BASE = 'http://localhost:5000';
+
+  /* ── DOM refs ────────────────────────────────────────────────────────────── */
+  const output    = document.getElementById('output');
+  const cmdInput  = document.getElementById('cmd-input');
+  const micBtn    = document.getElementById('mic-btn');
+  const micLabel  = document.getElementById('mic-label');
+  const modeBadge = document.getElementById('mode-badge');
+  const inputPrompt = document.getElementById('input-prompt');
+  const voiceStatus = document.getElementById('voice-status');
+
+  /* ── state ───────────────────────────────────────────────────────────────── */
+  let currentCwd = '~';
+  let isRecording = false;
+
+  /* ── fetch current cwd on load ───────────────────────────────────────────── */
+  fetch(`${API_BASE}/cwd`)
+    .then(r => r.json())
+    .then(d => { currentCwd = shortenPath(d.cwd); })
+    .catch(() => {}); // backend may not be up yet; non-fatal
+
+  /* ── path helpers ────────────────────────────────────────────────────────── */
+  function shortenPath(p) {
+    const home = ''; // we don't know client home; just shorten long paths
+    return p.length > 36 ? '…' + p.slice(-34) : p;
+  }
+
+  /* ── render helpers ──────────────────────────────────────────────────────── */
+  function appendEntry(cwd, cmdText, outputText, errorText, source, heardText = null) {
+    const isKbd = source === 'keyboard';
+    const entry = document.createElement('div');
+    entry.className = 'entry';
+
+    // prompt line
+    const promptLine = document.createElement('div');
+    promptLine.className = 'entry-prompt';
+
+    const srcTag = document.createElement('span');
+    srcTag.className = `source-tag ${isKbd ? 'kbd' : 'mic'}`;
+    srcTag.textContent = isKbd ? 'KBD' : 'MIC';
+
+    const cwdSpan = document.createElement('span');
+    cwdSpan.className = 'prompt-cwd';
+    cwdSpan.textContent = cwd;
+
+    const promptChar = document.createElement('span');
+    promptChar.className = `prompt-char ${isKbd ? 'kbd' : 'mic'}`;
+    promptChar.textContent = ' $ ';
+
+    const cmdSpan = document.createElement('span');
+    cmdSpan.className = 'cmd-text';
+    cmdSpan.textContent = cmdText;
+
+    promptLine.append(srcTag, cwdSpan, promptChar, cmdSpan);
+    entry.appendChild(promptLine);
+
+    // NLP annotation — shown when voice input was normalized to a different command
+    if (heardText) {
+      const heard = document.createElement('div');
+      heard.className = 'entry-heard';
+      heard.textContent = `"${heardText}"`;
+      entry.appendChild(heard);
+    }
+
+    // output / error
+    if (outputText) {
+      const out = document.createElement('div');
+      out.className = 'entry-output';
+      out.textContent = outputText;
+      entry.appendChild(out);
+    }
+    if (errorText) {
+      const err = document.createElement('div');
+      err.className = 'entry-output is-error';
+      err.textContent = errorText;
+      entry.appendChild(err);
+    }
+
+    output.appendChild(entry);
+    output.scrollTop = output.scrollHeight;
+  }
+
+  /* ── clear screen ────────────────────────────────────────────────────────── */
+  function clearOutput() {
+    output.querySelectorAll('.entry').forEach(el => el.remove());
+  }
+
+  /* ── core execution — single pipeline for both modalities ────────────────── */
+  async function executeCommand(rawText, source) {
+    const cmd = rawText.trim();
+    if (!cmd) return;
+
+    // cls is a frontend-only operation — no round-trip needed
+    if (cmd === 'cls') {
+      clearOutput();
+      return;
+    }
+
+    const snapshotCwd = currentCwd; // capture cwd at invocation time
+
+    let result = { output: '', error: '', cwd: currentCwd };
+
+    try {
+      const resp = await fetch(`${API_BASE}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd, source }),
+      });
+
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      result = await resp.json();
+      currentCwd = shortenPath(result.cwd || currentCwd);
+
+      // cls (typed or voice-normalized) clears the screen with no history entry
+      if (result.clear) { clearOutput(); return; }
+    } catch (err) {
+      result.error = `connection error: ${err.message}. Is the server running on port 5000?`;
+    }
+
+    // result.normalized holds the original spoken text when NLP rewrote the command
+    const displayCmd   = result.normalized ? cmd : cmd;   // always the normalized command
+    const heardText    = result.normalized || null;
+
+    appendEntry(snapshotCwd, displayCmd, result.output, result.error, source, heardText);
+  }
+
+  /* ── keyboard input handler ──────────────────────────────────────────────── */
+  cmdInput.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    const text = cmdInput.value;
+    cmdInput.value = '';
+    await executeCommand(text, 'keyboard');
+  });
+
+  /* ── Web Speech API ──────────────────────────────────────────────────────── */
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  let recognition = null;
+
+  if (!SpeechRecognition) {
+    micBtn.disabled = true;
+    micBtn.title = 'Speech recognition not supported in this browser';
+    micLabel.textContent = 'n/a';
+  } else {
+    recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = true;  // show live transcript
+    recognition.maxAlternatives = 1;
+    recognition.continuous = false;
+
+    recognition.onstart = () => {
+      isRecording = true;
+      micBtn.classList.add('recording');
+      micLabel.textContent = 'stop';
+      inputPrompt.classList.add('mic-active');
+      inputPrompt.textContent = '🎤 ';
+      modeBadge.className = 'mic';
+      modeBadge.textContent = 'MIC';
+      cmdInput.disabled = true;
+      cmdInput.placeholder = 'listening…';
+      voiceStatus.textContent = '● recording — speak your command';
+    };
+
+    recognition.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      const isFinal = e.results[0].isFinal;
+      cmdInput.value = transcript;
+      voiceStatus.textContent = isFinal
+        ? `✓ heard: "${transcript}"`
+        : `● "${transcript}"`;
+    };
+
+    recognition.onend = async () => {
+      const spokenText = cmdInput.value;
+      stopMic();
+
+      if (spokenText.trim()) {
+        cmdInput.value = '';
+        voiceStatus.textContent = '';
+        await executeCommand(spokenText, 'voice');
+      } else {
+        voiceStatus.textContent = '';
+      }
+    };
+
+    recognition.onerror = (e) => {
+      stopMic();
+      voiceStatus.textContent = '';
+      if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        appendEntry(currentCwd, '[voice]', '', `speech error: ${e.error}`, 'voice');
+      }
+    };
+  }
+
+  function startMic() {
+    if (!recognition || isRecording) return;
+    try { recognition.start(); }
+    catch (err) { console.warn('recognition.start():', err); }
+  }
+
+  function stopMic() {
+    isRecording = false;
+    micBtn.classList.remove('recording');
+    micLabel.textContent = 'mic';
+    inputPrompt.classList.remove('mic-active');
+    inputPrompt.textContent = '$ ';
+    modeBadge.className = 'kbd';
+    modeBadge.textContent = 'KBD';
+    cmdInput.disabled = false;
+    cmdInput.placeholder = 'type a command…';
+    cmdInput.focus();
+    try { if (recognition) recognition.stop(); } catch (_) {}
+  }
+
+  micBtn.addEventListener('click', () => {
+    if (isRecording) stopMic();
+    else startMic();
+  });
+
+  /* ── Alt+M global shortcut ───────────────────────────────────────────────── */
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && e.key === 'm') {
+      e.preventDefault();
+      if (isRecording) stopMic();
+      else startMic();
+    }
+  });
+
+  /* ── autofocus ───────────────────────────────────────────────────────────── */
+  cmdInput.focus();
+</script>
+</body>
+</html>

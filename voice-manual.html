@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voice manual — dual-shell</title>
+<!-- ═════════ INTEGRATION ═════════
+ Copy three things into your frontend: this <style> block, the <button id="vm-open">
+ + <aside id="vm"> markup, and the <script> block. Set VM_API to your backend.
+ Open from anywhere with VoiceManual.open(); press ? to toggle. -->
+<style>
+:root{
+  --bg:#f3f5fa; --surface:#fff; --ink:#17203a; --muted:#59627a; --line:#d8deec;
+  --accent:#2748d6; --on-accent:#fff; --mark:#ffd65a; --on-mark:#3b2f00; --ok:#0b7d6e; --err:#b3261e;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1529; --surface:#172040; --ink:#eceffa; --muted:#9aa4c2; --line:#2a3560;
+  --accent:#8aa0ff; --on-accent:#0b1030; --mark:#e8b93a; --on-mark:#1e1700; --ok:#4fd1bc; --err:#ff8a80;}}
+:root[data-theme="dark"]{
+  --bg:#0f1529; --surface:#172040; --ink:#eceffa; --muted:#9aa4c2; --line:#2a3560;
+  --accent:#8aa0ff; --on-accent:#0b1030; --mark:#e8b93a; --on-mark:#1e1700; --ok:#4fd1bc; --err:#ff8a80;}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 var(--sans);
+  padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* demo page chrome (not part of the manual) */
+.demo{max-width:640px;margin:0 auto;padding:12vh 24px}
+.demo h1{font:600 2rem/1.2 var(--serif);margin:0 0 .5rem}
+.demo p{color:var(--muted);margin:0 0 1.5rem}
+#vm-open{background:var(--accent);color:var(--on-accent);border:0;border-radius:8px;
+  padding:.65rem 1rem;cursor:pointer;font-weight:600}
+
+/* manual drawer */
+#vm-scrim{position:fixed;inset:0;background:rgba(10,14,30,.45);opacity:0;pointer-events:none;transition:opacity .2s}
+#vm{position:fixed;top:0;right:0;bottom:0;width:min(620px,100vw);background:var(--bg);
+  border-left:1px solid var(--line);display:flex;flex-direction:column;
+  transform:translateX(100%);transition:transform .25s ease;visibility:hidden;
+  padding-top:env(safe-area-inset-top,0)}
+body.vm-on #vm{transform:none;visibility:visible}
+body.vm-on #vm-scrim{opacity:1;pointer-events:auto}
+@media (prefers-reduced-motion:reduce){#vm,#vm-scrim{transition:none}}
+
+.vm-head{padding:18px 20px 12px;display:flex;gap:12px;align-items:flex-start}
+.vm-head h2{font:600 1.5rem/1.2 var(--serif);margin:0}
+.vm-head p{margin:.25rem 0 0;color:var(--muted);font-size:.9rem;max-width:44ch}
+.vm-x{margin-left:auto;background:none;border:1px solid var(--line);border-radius:8px;width:36px;height:36px;cursor:pointer}
+.vm-ai{display:inline-block;margin-top:.5rem;font-size:.78rem;padding:.15rem .55rem;border-radius:99px;
+  border:1px solid var(--line);color:var(--muted)}
+.vm-ai.on{color:var(--ok);border-color:var(--ok)}
+
+.vm-search{margin:0 20px 10px;width:calc(100% - 40px);padding:.6rem .8rem;border:1px solid var(--line);
+  border-radius:8px;background:var(--surface)}
+.vm-tabs{display:flex;gap:6px;overflow-x:auto;padding:0 20px 10px;scrollbar-width:thin}
+.vm-tab{flex:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  padding:.4rem .7rem;cursor:pointer;text-align:left;line-height:1.25}
+.vm-tab b{display:block;font-size:.9rem}
+.vm-tab span{font:.72rem var(--mono);color:var(--muted)}
+.vm-tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.vm-tab[aria-selected="true"] span{color:inherit;opacity:.85}
+
+.vm-body{flex:1;overflow-y:auto;padding:4px 20px 24px}
+.vm-cmd h3.t{font:600 1.35rem/1.2 var(--serif);margin:.4rem 0 .15rem}
+.vm-cmd .s{color:var(--muted);margin:0 0 .25rem}
+.vm-use{font:.85rem var(--mono);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:.1rem .45rem}
+.vm-group{margin-top:1.4rem}
+.vm-gh{display:flex;flex-wrap:wrap;gap:.4rem .75rem;align-items:baseline;justify-content:space-between;
+  border-bottom:1px solid var(--line);padding-bottom:.35rem}
+.vm-gh h4{margin:0;font-size:.95rem}
+.vm-gh code{font:.82rem var(--mono);color:var(--ok)}
+.vm-tip{margin:.4rem 0 0;font-size:.85rem;color:var(--muted)}
+.vm-list{list-style:none;margin:.2rem 0 0;padding:0}
+.vm-ph-row{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px dashed var(--line);
+  padding:.5rem .25rem;cursor:pointer;font:1.08rem/1.35 var(--serif)}
+.vm-ph-row:hover{background:var(--surface)}
+.vm-ph-row::before{content:"“";color:var(--muted)} .vm-ph-row::after{content:"”";color:var(--muted)}
+.vm-ph{font:.8rem var(--sans);background:var(--mark);color:var(--on-mark);border-radius:4px;padding:.05rem .4rem;margin:0 .1rem}
+.vm-cmdname{font:.72rem var(--mono);color:var(--muted);margin-left:.5rem}
+.vm-sym{width:100%;border-collapse:collapse;margin-top:.5rem}
+.vm-sym th,.vm-sym td{text-align:left;padding:.5rem .4rem;border-bottom:1px solid var(--line);font-size:.92rem}
+.vm-sym td:nth-child(2),.vm-sym td:nth-child(4){font-family:var(--mono)}
+.vm-tips{padding-left:1.1rem;color:var(--muted)} .vm-tips li{margin:.35rem 0}
+.vm-empty{color:var(--muted);padding:2rem 0;text-align:center}
+.vm-empty button{margin-top:.6rem;background:var(--accent);color:var(--on-accent);border:0;border-radius:8px;padding:.5rem .9rem;cursor:pointer}
+
+/* try-it bar */
+.vm-try{border-top:1px solid var(--line);background:var(--surface);padding:12px 20px calc(12px + env(safe-area-inset-bottom,0))}
+.vm-try label{font-size:.82rem;color:var(--muted)}
+.vm-row{display:flex;gap:8px;margin-top:.3rem}
+.vm-row input{flex:1;min-width:0;padding:.55rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.vm-row button{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:0 .8rem;cursor:pointer}
+.vm-row button.go{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.vm-row button.rec{border-color:var(--err);color:var(--err)}
+#vm-result{margin-top:.5rem;font-size:.9rem;min-height:1.4em}
+#vm-result code{font:.9rem var(--mono);color:var(--ok);background:var(--bg);padding:.1rem .4rem;border-radius:5px}
+#vm-result.bad{color:var(--err)} #vm-result small{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<div class="demo">
+  <h1>dual-shell</h1>
+  <p>Control the terminal by voice. Not sure what to say? Open the manual and tap any phrase to try it.</p>
+  <button id="vm-open" type="button" aria-haspopup="dialog">Voice manual <kbd style="opacity:.7">?</kbd></button>
+</div>
+
+<div id="vm-scrim"></div>
+<aside id="vm" role="dialog" aria-modal="true" aria-labelledby="vm-title" aria-hidden="true">
+  <header class="vm-head">
+    <div>
+      <h2 id="vm-title">Voice manual</h2>
+      <p>Say any phrase below, word for word. Everyday wording works too — the AI fills in the gaps.</p>
+      <span class="vm-ai" id="vm-ai">checking AI…</span>
+    </div>
+    <button class="vm-x" id="vm-close" type="button" aria-label="Close voice manual">✕</button>
+  </header>
+  <input class="vm-search" id="vm-q" type="search" placeholder="Search phrases, e.g. “list”, “home”, “read”" aria-label="Search phrases">
+  <div class="vm-tabs" id="vm-tabs" role="tablist" aria-label="Commands"></div>
+  <main class="vm-body" id="vm-body" role="tabpanel"></main>
+  <footer class="vm-try">
+    <label for="vm-in">Try a phrase — tap one above, type, or speak</label>
+    <div class="vm-row">
+      <input id="vm-in" type="text" autocomplete="off" placeholder="e.g. take me to projects">
+      <button type="button" id="vm-mic" hidden aria-label="Speak a phrase">🎤</button>
+      <button type="button" class="go" id="vm-go">Check</button>
+    </div>
+    <div id="vm-result" aria-live="polite"></div>
+  </footer>
+</aside>
+
+<script>
+(() => {
+  const VM_API = "http://localhost:5000";                 // ← your backend
+  const SAY = {"<folder>":"projects", "<file>":"notes dot txt", "<text>":"hello world"};
+  const PH  = {"<folder>":"folder name", "<file>":"file name", "<text>":"your message"};
+  const VIA = {phrasebook:"exact phrase", llm:"AI", regex:"pattern match", passthrough:"typed command"};
+  const $ = s => document.querySelector(s);
+  const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
+  let data = null, active = null, opener = null;
+
+  const fill = s => Object.entries(SAY).reduce((a, [k, v]) => a.split(k).join(v), s);
+
+  function phraseNode(p) {                                  // highlights <placeholders>
+    const b = el("button", "vm-ph-row"); b.type = "button";
+    p.split(/(<\w+>)/).forEach(part => {
+      if (PH[part]) b.append(el("span", "vm-ph", PH[part]));
+      else if (part) b.append(document.createTextNode(part));
+    });
+    b.addEventListener("click", () => { $("#vm-in").value = fill(p); check(); });
+    return b;
+  }
+
+  function groupNode(g, cmd, q) {
+    const list = g.phrases.filter(p => !q || p.toLowerCase().includes(q) || g.name.toLowerCase().includes(q));
+    if (!list.length) return null;
+    const wrap = el("section", "vm-group"), head = el("div", "vm-gh");
+    head.append(el("h4", "", g.name), el("code", "", "→ " + g.expect));
+    wrap.append(head);
+    if (g.tip) wrap.append(el("p", "vm-tip", g.tip));
+    const ul = el("ul", "vm-list");
+    list.forEach(p => { const li = el("li"); const b = phraseNode(p);
+      if (q) b.append(el("span", "vm-cmdname", cmd.command)); li.append(b); ul.append(li); });
+    wrap.append(ul); return wrap;
+  }
+
+  function extras() {
+    const f = document.createDocumentFragment();
+    f.append(el("h3", "t", "Saying file and folder names"),
+             el("p", "s", "Spell symbols out loud and the manual converts them."));
+    const t = el("table", "vm-sym");
+    t.innerHTML = "<thead><tr><th>Say</th><th>Gets</th><th>Example</th><th>Becomes</th></tr></thead>";
+    const tb = el("tbody");
+    data.symbols.forEach(s => { const r = el("tr"); [s.say, s.gets, s.example, s.result].forEach(x => r.append(el("td", "", x))); tb.append(r); });
+    t.append(tb); f.append(t, el("h3", "t", "Tips"));
+    const ul = el("ul", "vm-tips"); data.tips.forEach(x => ul.append(el("li", "", x))); f.append(ul);
+    return f;
+  }
+
+  function render() {
+    const body = $("#vm-body"), q = $("#vm-q").value.trim().toLowerCase();
+    body.replaceChildren();
+    document.querySelectorAll(".vm-tab").forEach(t => t.setAttribute("aria-selected", String(!q && t.dataset.id === active)));
+    if (q) {                                                // search across every command
+      let n = 0;
+      data.commands.forEach(c => c.groups.forEach(g => { const node = groupNode(g, c, q); if (node) { body.append(node); n++; } }));
+      if (!n) body.append(el("p", "vm-empty", `No phrase matches “${q}”. Try a shorter word, or just say it your own way.`));
+      return;
+    }
+    if (active === "symbols") { body.append(extras()); return; }
+    const c = data.commands.find(x => x.id === active), box = el("div", "vm-cmd");
+    const intro = el("p", "s", "Use these to " + c.summary + ". Command: ");
+    intro.append(el("span", "vm-use", c.usage));
+    box.append(el("h3", "t", c.title), intro);
+    c.groups.forEach(g => { const node = groupNode(g, c, ""); if (node) box.append(node); });
+    body.append(box); body.scrollTop = 0;
+  }
+
+  function buildTabs() {
+    const bar = $("#vm-tabs"); bar.replaceChildren();
+    [...data.commands.map(c => ({id:c.id, t:c.title, s:c.command})), {id:"symbols", t:"Names & tips", s:". / ~ _"}].forEach(x => {
+      const b = el("button", "vm-tab"); b.type = "button"; b.dataset.id = x.id; b.setAttribute("role", "tab");
+      b.append(el("b", "", x.t), el("span", "", x.s));
+      b.addEventListener("click", () => { active = x.id; $("#vm-q").value = ""; render(); });
+      bar.append(b);
+    });
+  }
+
+  async function load() {
+    $("#vm-body").replaceChildren(el("p", "vm-empty", "Loading phrases…"));
+    try {
+      const r = await fetch(VM_API + "/phrases"); if (!r.ok) throw 0;
+      data = await r.json(); active = active || data.commands[0].id;
+      const ai = $("#vm-ai"); ai.classList.toggle("on", data.llm_available);
+      ai.textContent = data.llm_available ? "AI understanding is on" : "AI is off — only the listed phrases work";
+      buildTabs(); render();
+    } catch {
+      const box = el("div", "vm-empty", `Can’t reach the backend at ${VM_API}. Start server.py, then retry.`);
+      const b = el("button", "", "Retry"); b.type = "button"; b.onclick = load; box.append(el("br"), b);
+      $("#vm-body").replaceChildren(box); $("#vm-ai").textContent = "backend offline";
+    }
+  }
+
+  async function check() {
+    const text = $("#vm-in").value.trim(), out = $("#vm-result"); out.className = "";
+    if (!text) { out.textContent = ""; return; }
+    out.textContent = "Checking…";
+    try {
+      const j = await (await fetch(VM_API + "/interpret", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text})})).json();
+      out.replaceChildren();
+      if (j.understood) { out.append(document.createTextNode("Runs "), el("code", "", j.command), document.createTextNode(" "), el("small", "", "· " + (VIA[j.method] || j.method))); }
+      else { out.className = "bad"; out.textContent = "Not understood. Pick a phrase above, or reword it."; }
+    } catch { out.className = "bad"; out.textContent = "Backend not reachable."; }
+  }
+
+  // speech input for the try-it box
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) { const mic = $("#vm-mic"); mic.hidden = false; let rec = null;
+    mic.onclick = () => {
+      if (rec) { rec.stop(); return; }
+      rec = new SR(); rec.lang = "en-US"; rec.interimResults = false; mic.classList.add("rec");
+      rec.onresult = e => { $("#vm-in").value = e.results[0][0].transcript; check(); };
+      rec.onend = rec.onerror = () => { rec = null; mic.classList.remove("rec"); };
+      rec.start();
+    }; }
+
+  function open()  { opener = document.activeElement; document.body.classList.add("vm-on"); $("#vm").setAttribute("aria-hidden", "false");
+                     if (!data) load(); setTimeout(() => $("#vm-q").focus(), 50); }
+  function close() { document.body.classList.remove("vm-on"); $("#vm").setAttribute("aria-hidden", "true"); opener && opener.focus(); }
+  const toggle = () => document.body.classList.contains("vm-on") ? close() : open();
+
+  $("#vm-open").onclick = open; $("#vm-close").onclick = close; $("#vm-scrim").onclick = close;
+  $("#vm-q").addEventListener("input", () => data && render());
+  $("#vm-go").onclick = check;
+  $("#vm-in").addEventListener("keydown", e => { if (e.key === "Enter") check(); });
+  document.addEventListener("keydown", e => {
+    const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+    if (e.key === "Escape" && document.body.classList.contains("vm-on")) close();
+    else if (e.key === "?" && !typing) { e.preventDefault(); toggle(); }
+    else if (e.key === "Tab" && document.body.classList.contains("vm-on")) {      // keep focus inside the dialog
+      const f = [...$("#vm").querySelectorAll("button:not([hidden]),input")].filter(x => !x.disabled);
+      const a = f[0], z = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); }
+      else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
+    }
+  });
+  window.VoiceManual = {open, close, toggle};
+})();
+</script>
+</body>
+</html>
